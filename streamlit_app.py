@@ -50,10 +50,44 @@ def mic_component():
         let mediaRecorder;
         let audioChunks = [];
         let ws;
+        let isSessionStarted = false;
 
         function logStatus(message) {{
             console.log(message);
             document.getElementById('statusLog').innerText = message;
+        }}
+
+        async function waitForSessionBegin(ws) {{
+            return new Promise((resolve, reject) => {{
+                const timeout = setTimeout(() => {{
+                    reject(new Error('Session initialization timeout'));
+                }}, 5000);
+
+                const messageHandler = (event) => {{
+                    const data = JSON.parse(event.data);
+                    if (data.message_type === 'SessionBegins') {{
+                        clearTimeout(timeout);
+                        ws.removeEventListener('message', messageHandler);
+                        resolve();
+                    }}
+                }};
+
+                ws.addEventListener('message', messageHandler);
+            }});
+        }}
+
+        async function initializeWebSocket() {{
+            const ws = new WebSocket('wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000');
+            
+            ws.onopen = () => {{
+                logStatus('Connection established, initializing session...');
+                ws.send(JSON.stringify({{
+                    "session_begins": true,
+                    "token": "{API_KEY}"
+                }}));
+            }};
+
+            return ws;
         }}
 
         async function startRecording() {{
@@ -62,22 +96,18 @@ def mic_component():
                 const stream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
                 logStatus('Microphone access granted, connecting to API...');
 
-                // Create WebSocket connection
-                ws = new WebSocket('wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000');
+                // Initialize WebSocket
+                ws = await initializeWebSocket();
 
                 // Set up WebSocket handlers
-                ws.onopen = () => {{
-                    logStatus('Connection established');
-                    ws.send(JSON.stringify({{
-                        "session_begins": true,
-                        "token": "{API_KEY}"
-                    }}));
-                    startMediaRecorder(stream);
-                }};
-
                 ws.onmessage = (event) => {{
                     const data = JSON.parse(event.data);
-                    if (data.message_type === 'FinalTranscript') {{
+                    console.log('Received:', data);
+
+                    if (data.message_type === 'SessionBegins' && !isSessionStarted) {{
+                        isSessionStarted = true;
+                        startMediaRecorder(stream);
+                    }} else if (data.message_type === 'FinalTranscript') {{
                         window.parent.postMessage({{
                             type: 'streamlit:message',
                             text: data.text
@@ -91,6 +121,7 @@ def mic_component():
                 }};
 
                 ws.onclose = (event) => {{
+                    isSessionStarted = false;
                     logStatus('Connection closed');
                     stopMediaRecorder();
                 }};
@@ -102,16 +133,21 @@ def mic_component():
         }}
 
         function startMediaRecorder(stream) {{
-            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder = new MediaRecorder(stream, {{
+                mimeType: 'audio/webm;codecs=opus',
+                audioBitsPerSecond: 128000
+            }});
             
             mediaRecorder.ondataavailable = async (event) => {{
                 if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {{
                     const reader = new FileReader();
                     reader.onloadend = () => {{
                         const base64data = reader.result.split(',')[1];
-                        ws.send(JSON.stringify({{
-                            "audio_data": base64data
-                        }}));
+                        if (ws.readyState === WebSocket.OPEN) {{
+                            ws.send(JSON.stringify({{
+                                "audio_data": base64data
+                            }}));
+                        }}
                     }};
                     reader.readAsDataURL(event.data);
                 }}
