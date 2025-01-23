@@ -7,10 +7,6 @@ import os
 from pathlib import Path
 import streamlit.components.v1 as components
 
-# Get port from environment variable and set it for Streamlit
-os.environ['STREAMLIT_SERVER_PORT'] = os.environ.get('PORT', '8501')
-os.environ['STREAMLIT_SERVER_ADDRESS'] = '0.0.0.0'
-
 # Configure Streamlit
 st.set_page_config(
     page_title="Real-Time Transcription",
@@ -47,12 +43,17 @@ def mic_component():
         let ws;
 
         async function setupWebSocket() {
-            ws = new WebSocket('wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000');
+            ws = new WebSocket('wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000', {
+                headers: {
+                    'Authorization': '0c61b4cc27bf405c856cf0796e6b7f97'
+                }
+            });
             
             ws.onopen = () => {
                 console.log('WebSocket Connected');
                 ws.send(JSON.stringify({
-                    "session_begins": true
+                    "session_begins": true,
+                    "token": "0c61b4cc27bf405c856cf0796e6b7f97"
                 }));
             };
 
@@ -65,6 +66,10 @@ def mic_component():
                         text: data.text
                     }, '*');
                 }
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket Error:', error);
             };
         }
 
