@@ -71,41 +71,30 @@ def mic_component():
             }, '*');
         }
 
-        class WebSocketClient extends WebSocket {
-            constructor(url, options = {}) {
-                super(url);
-                this.addEventListener('open', () => {
-                    if (options.headers) {
-                        for (const [key, value] of Object.entries(options.headers)) {
-                            this.send(JSON.stringify({ [key]: value }));
-                        }
-                    }
-                });
-            }
-        }
-
         async function initializeConnection() {
             try {
                 logStatus('Initializing connection...');
                 updateConnectionStatus('Connecting...', false);
-                
-                // Create WebSocket with custom implementation
-                ws = new WebSocketClient('wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000', {
-                    headers: {
-                        'authorization': API_KEY
-                    }
-                });
+
+                // Create URL with API key as a query parameter
+                const wsUrl = new URL('wss://api.assemblyai.com/v2/realtime/ws');
+                wsUrl.searchParams.set('sample_rate', '16000');
+                wsUrl.searchParams.set('token', API_KEY);
+
+                logStatus('Creating WebSocket connection...');
+                ws = new WebSocket(wsUrl.toString());
+
+                ws.onopen = () => {
+                    logStatus('Connection established');
+                    startRecording();
+                };
 
                 ws.onmessage = (event) => {
                     try {
                         const data = JSON.parse(event.data);
                         console.log('Received message:', data);
                         
-                        if (data.message_type === 'Connected') {
-                            logStatus('Connection established, starting recording...');
-                            isConnected = true;
-                            startRecording();
-                        } else if (data.message_type === 'FinalTranscript') {
+                        if (data.message_type === 'FinalTranscript') {
                             window.parent.postMessage({
                                 type: 'streamlit:message',
                                 text: data.text
@@ -153,6 +142,7 @@ def mic_component():
                 logStatus('Requesting microphone access...');
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 logStatus('Microphone access granted');
+                isConnected = true;
                 
                 mediaRecorder = new MediaRecorder(stream, {
                     mimeType: 'audio/webm;codecs=opus'
@@ -160,16 +150,14 @@ def mic_component():
                 
                 mediaRecorder.ondataavailable = async (event) => {
                     try {
-                        if (event.data.size > 0 && isConnected) {
+                        if (event.data.size > 0 && isConnected && ws.readyState === WebSocket.OPEN) {
                             const reader = new FileReader();
                             reader.onloadend = () => {
                                 try {
                                     const base64data = reader.result.split(',')[1];
-                                    if (ws && ws.readyState === WebSocket.OPEN) {
-                                        ws.send(JSON.stringify({
-                                            "audio_data": base64data
-                                        }));
-                                    }
+                                    ws.send(JSON.stringify({
+                                        "audio_data": base64data
+                                    }));
                                 } catch (error) {
                                     logStatus(`Error sending audio: ${error.message}`);
                                 }
