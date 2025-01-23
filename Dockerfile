@@ -2,8 +2,11 @@ FROM python:3.9-slim
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
+    build-essential \
+    gcc \
     portaudio19-dev \
     python3-pyaudio \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -12,7 +15,7 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Install Python dependencies
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application
 COPY . .
