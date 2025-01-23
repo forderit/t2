@@ -7,8 +7,9 @@ import os
 from pathlib import Path
 import streamlit.components.v1 as components
 
-# Get port from environment variable
-port = int(os.environ.get("PORT", 8501))
+# Get port from environment variable and set it for Streamlit
+os.environ['STREAMLIT_SERVER_PORT'] = os.environ.get('PORT', '8501')
+os.environ['STREAMLIT_SERVER_ADDRESS'] = '0.0.0.0'
 
 # Configure Streamlit
 st.set_page_config(
