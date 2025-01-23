@@ -71,41 +71,38 @@ def mic_component():
             }, '*');
         }
 
+        class WebSocketClient extends WebSocket {
+            constructor(url, options = {}) {
+                super(url);
+                this.addEventListener('open', () => {
+                    if (options.headers) {
+                        for (const [key, value] of Object.entries(options.headers)) {
+                            this.send(JSON.stringify({ [key]: value }));
+                        }
+                    }
+                });
+            }
+        }
+
         async function initializeConnection() {
             try {
                 logStatus('Initializing connection...');
                 updateConnectionStatus('Connecting...', false);
-
-                // Create WebSocket with custom headers
-                const wsUrl = 'wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000';
                 
-                // Use a more standard approach for passing the authorization token
-                const websocketHeaders = {
-                    'Authorization': API_KEY
-                };
-
-                // Create WebSocket with provided headers
-                ws = new WebSocket(wsUrl);
-                
-                // Set the Authorization header using a property
-                ws.authorization = API_KEY;
-
-                ws.onopen = async () => {
-                    logStatus('Connection established, authenticating...');
-                    // Send initial message with authorization
-                    ws.send(JSON.stringify({
-                        'session_begins': true,
+                // Create WebSocket with custom implementation
+                ws = new WebSocketClient('wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000', {
+                    headers: {
                         'authorization': API_KEY
-                    }));
-                };
+                    }
+                });
 
                 ws.onmessage = (event) => {
                     try {
                         const data = JSON.parse(event.data);
                         console.log('Received message:', data);
                         
-                        if (data.message_type === 'SessionBegins') {
-                            logStatus('Authentication successful, starting recording...');
+                        if (data.message_type === 'Connected') {
+                            logStatus('Connection established, starting recording...');
                             isConnected = true;
                             startRecording();
                         } else if (data.message_type === 'FinalTranscript') {
@@ -168,9 +165,11 @@ def mic_component():
                             reader.onloadend = () => {
                                 try {
                                     const base64data = reader.result.split(',')[1];
-                                    ws.send(JSON.stringify({
-                                        "audio_data": base64data
-                                    }));
+                                    if (ws && ws.readyState === WebSocket.OPEN) {
+                                        ws.send(JSON.stringify({
+                                            "audio_data": base64data
+                                        }));
+                                    }
                                 } catch (error) {
                                     logStatus(`Error sending audio: ${error.message}`);
                                 }
