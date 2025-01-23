@@ -67,13 +67,16 @@ def mic_component():
             try {
                 logStatus('Connecting to AssemblyAI WebSocket...');
                 
-                ws = new WebSocket('wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000');
+                ws = new WebSocket('wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000', {
+                    headers: {
+                        'Authorization': '0c61b4cc27bf405c856cf0796e6b7f97'
+                    }
+                });
                 
                 ws.onopen = () => {
                     logStatus('WebSocket Connected - Sending initial configuration');
                     ws.send(JSON.stringify({
-                        "session_begins": true,
-                        "token": "0c61b4cc27bf405c856cf0796e6b7f97"
+                        "session_begins": true
                     }));
                 };
 
