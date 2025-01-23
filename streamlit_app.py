@@ -43,7 +43,7 @@ def mic_component():
     return components.html(
         """
         <div>
-            <button onclick="startRecording()" id="startBtn">Start Recording</button>
+            <button onclick="initializeConnection()" id="startBtn">Start Recording</button>
             <button onclick="stopRecording()" id="stopBtn" disabled>Stop Recording</button>
             <div id="statusLog" style="margin-top: 10px; color: gray;"></div>
             <div id="connectionStatus" style="margin-top: 5px; font-size: 12px;"></div>
@@ -53,8 +53,7 @@ def mic_component():
         let mediaRecorder;
         let audioChunks = [];
         let ws;
-        let connectionAttempts = 0;
-        const MAX_RETRIES = 3;
+        let isConnected = false;
         const API_KEY = '0c61b4cc27bf405c856cf0796e6b7f97';
 
         function updateConnectionStatus(message, isError = false) {
@@ -72,35 +71,40 @@ def mic_component():
             }, '*');
         }
 
-        async function setupWebSocket() {
+        async function initializeConnection() {
             try {
-                connectionAttempts++;
-                logStatus(`Attempting to connect to AssemblyAI (Attempt ${connectionAttempts}/${MAX_RETRIES})`);
+                // First, establish WebSocket connection
+                logStatus('Initializing WebSocket connection...');
                 updateConnectionStatus('Connecting...', false);
-
-                // Create WebSocket URL with API key as a query parameter
-                const wsUrl = `wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000&token=${API_KEY}`;
-                ws = new WebSocket(wsUrl);
-
-                ws.onopen = () => {
-                    logStatus('WebSocket Connected Successfully');
-                    updateConnectionStatus('Connected', false);
-                    // Send configuration message
-                    ws.send(JSON.stringify({ "session_begins": true }));
+                
+                ws = new WebSocket('wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000');
+                
+                ws.onopen = async () => {
+                    logStatus('WebSocket connection established');
+                    // Send authorization message
+                    ws.send(JSON.stringify({
+                        "session_begins": true,
+                        "token": API_KEY
+                    }));
                 };
 
                 ws.onmessage = (event) => {
                     try {
                         const data = JSON.parse(event.data);
-                        logStatus(`Received: ${data.message_type}`);
+                        console.log('Received message:', data);
                         
                         if (data.message_type === 'SessionBegins') {
-                            logStatus('Session started successfully');
+                            logStatus('Session authenticated, starting recording...');
+                            isConnected = true;
+                            startRecording();
                         } else if (data.message_type === 'FinalTranscript') {
                             window.parent.postMessage({
                                 type: 'streamlit:message',
                                 text: data.text
                             }, '*');
+                        } else if (data.error) {
+                            logStatus(`Error from server: ${data.error}`);
+                            updateConnectionStatus('Server Error', true);
                         }
                     } catch (error) {
                         logStatus(`Error processing message: ${error.message}`);
@@ -114,16 +118,15 @@ def mic_component():
                 };
 
                 ws.onclose = (event) => {
+                    isConnected = false;
                     logStatus(`WebSocket Closed (${event.code})`);
                     updateConnectionStatus('Disconnected', true);
-                    
-                    if (connectionAttempts < MAX_RETRIES) {
-                        setTimeout(setupWebSocket, 2000);
-                    }
+                    document.getElementById('startBtn').disabled = false;
+                    document.getElementById('stopBtn').disabled = true;
                 };
 
             } catch (error) {
-                logStatus(`Connection Error: ${error.message}`);
+                logStatus(`Setup Error: ${error.message}`);
                 updateConnectionStatus('Failed to Connect', true);
                 console.error('Setup Error:', error);
             }
@@ -131,7 +134,6 @@ def mic_component():
 
         async function startRecording() {
             try {
-                connectionAttempts = 0;
                 logStatus('Requesting microphone access...');
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 logStatus('Microphone access granted');
@@ -140,44 +142,40 @@ def mic_component():
                 
                 mediaRecorder.ondataavailable = async (event) => {
                     try {
-                        audioChunks.push(event.data);
-                        if (audioChunks.length > 0) {
-                            const audioBlob = new Blob(audioChunks);
+                        if (event.data.size > 0 && isConnected) {
                             const reader = new FileReader();
-                            
                             reader.onloadend = () => {
                                 try {
                                     const base64data = reader.result.split(',')[1];
-                                    if (ws && ws.readyState === WebSocket.OPEN) {
-                                        ws.send(JSON.stringify({
-                                            "audio_data": base64data
-                                        }));
-                                    } else {
-                                        logStatus('WebSocket not ready - reconnecting...');
-                                        if (connectionAttempts < MAX_RETRIES) {
-                                            setupWebSocket();
-                                        }
-                                    }
+                                    ws.send(JSON.stringify({
+                                        "audio_data": base64data
+                                    }));
                                 } catch (error) {
-                                    logStatus(`Error processing audio: ${error.message}`);
+                                    logStatus(`Error sending audio: ${error.message}`);
                                 }
                             };
-                            
-                            reader.readAsDataURL(audioBlob);
-                            audioChunks = [];
+                            reader.readAsDataURL(event.data);
                         }
                     } catch (error) {
                         logStatus(`Error handling audio data: ${error.message}`);
                     }
                 };
 
+                mediaRecorder.onstart = () => {
+                    logStatus('Recording started');
+                    updateConnectionStatus('Recording Active', false);
+                };
+
+                mediaRecorder.onerror = (error) => {
+                    logStatus(`MediaRecorder error: ${error.message}`);
+                };
+                
                 mediaRecorder.start(250);
                 document.getElementById('startBtn').disabled = true;
                 document.getElementById('stopBtn').disabled = false;
-                await setupWebSocket();
                 
             } catch (error) {
-                logStatus(`Error accessing microphone: ${error.message}`);
+                logStatus(`Microphone error: ${error.message}`);
                 updateConnectionStatus('Microphone Error', true);
                 console.error('Microphone Error:', error);
                 alert('Error accessing microphone. Please ensure you have granted microphone permissions.');
@@ -196,7 +194,7 @@ def mic_component():
                 }
                 document.getElementById('startBtn').disabled = false;
                 document.getElementById('stopBtn').disabled = true;
-                updateConnectionStatus('Disconnected', false);
+                updateConnectionStatus('Stopped', false);
             } catch (error) {
                 logStatus(`Error stopping recording: ${error.message}`);
             }
