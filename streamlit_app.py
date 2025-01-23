@@ -73,18 +73,29 @@ def mic_component():
 
         async function initializeConnection() {
             try {
-                // First, establish WebSocket connection
-                logStatus('Initializing WebSocket connection...');
+                logStatus('Initializing connection...');
                 updateConnectionStatus('Connecting...', false);
+
+                // Create WebSocket with custom headers
+                const wsUrl = 'wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000';
                 
-                ws = new WebSocket('wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000');
+                // Use a more standard approach for passing the authorization token
+                const websocketHeaders = {
+                    'Authorization': API_KEY
+                };
+
+                // Create WebSocket with provided headers
+                ws = new WebSocket(wsUrl);
                 
+                // Set the Authorization header using a property
+                ws.authorization = API_KEY;
+
                 ws.onopen = async () => {
-                    logStatus('WebSocket connection established');
-                    // Send authorization message
+                    logStatus('Connection established, authenticating...');
+                    // Send initial message with authorization
                     ws.send(JSON.stringify({
-                        "session_begins": true,
-                        "token": API_KEY
+                        'session_begins': true,
+                        'authorization': API_KEY
                     }));
                 };
 
@@ -94,7 +105,7 @@ def mic_component():
                         console.log('Received message:', data);
                         
                         if (data.message_type === 'SessionBegins') {
-                            logStatus('Session authenticated, starting recording...');
+                            logStatus('Authentication successful, starting recording...');
                             isConnected = true;
                             startRecording();
                         } else if (data.message_type === 'FinalTranscript') {
@@ -103,7 +114,7 @@ def mic_component():
                                 text: data.text
                             }, '*');
                         } else if (data.error) {
-                            logStatus(`Error from server: ${data.error}`);
+                            logStatus(`Server Error: ${data.error}`);
                             updateConnectionStatus('Server Error', true);
                         }
                     } catch (error) {
@@ -112,22 +123,30 @@ def mic_component():
                 };
 
                 ws.onerror = (error) => {
-                    logStatus(`WebSocket Error: ${error.message}`);
+                    logStatus(`WebSocket Error: ${error.message || 'Unknown error'}`);
                     updateConnectionStatus('Connection Error', true);
                     console.error('WebSocket Error:', error);
                 };
 
                 ws.onclose = (event) => {
                     isConnected = false;
-                    logStatus(`WebSocket Closed (${event.code})`);
-                    updateConnectionStatus('Disconnected', true);
+                    let closeReason = '';
+                    if (event.code === 4001) {
+                        closeReason = 'Authentication Failed';
+                    } else if (event.code === 1000) {
+                        closeReason = 'Normal Closure';
+                    } else {
+                        closeReason = `Code: ${event.code}`;
+                    }
+                    logStatus(`WebSocket Closed (${closeReason})`);
+                    updateConnectionStatus('Disconnected: ' + closeReason, true);
                     document.getElementById('startBtn').disabled = false;
                     document.getElementById('stopBtn').disabled = true;
                 };
 
             } catch (error) {
                 logStatus(`Setup Error: ${error.message}`);
-                updateConnectionStatus('Failed to Connect', true);
+                updateConnectionStatus('Connection Failed', true);
                 console.error('Setup Error:', error);
             }
         }
@@ -138,7 +157,9 @@ def mic_component():
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 logStatus('Microphone access granted');
                 
-                mediaRecorder = new MediaRecorder(stream);
+                mediaRecorder = new MediaRecorder(stream, {
+                    mimeType: 'audio/webm;codecs=opus'
+                });
                 
                 mediaRecorder.ondataavailable = async (event) => {
                     try {
@@ -189,8 +210,8 @@ def mic_component():
                     logStatus('Recording stopped');
                 }
                 if (ws) {
-                    ws.close();
-                    logStatus('WebSocket connection closed');
+                    ws.close(1000, 'User stopped recording');
+                    logStatus('Connection closed');
                 }
                 document.getElementById('startBtn').disabled = false;
                 document.getElementById('stopBtn').disabled = true;
