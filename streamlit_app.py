@@ -7,6 +7,15 @@ import os
 from pathlib import Path
 import streamlit.components.v1 as components
 
+# Get port from environment variable
+port = int(os.environ.get("PORT", 8501))
+
+# Configure Streamlit
+st.set_page_config(
+    page_title="Real-Time Transcription",
+    page_icon="🎙️"
+)
+
 # Session state
 if 'text' not in st.session_state:
     st.session_state['text'] = 'Listening...'
