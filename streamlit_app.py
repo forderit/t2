@@ -76,32 +76,39 @@ def mic_component():
                 logStatus('Initializing connection...');
                 updateConnectionStatus('Connecting...', false);
 
-                // Create URL with API key as a query parameter
-                const wsUrl = new URL('wss://api.assemblyai.com/v2/realtime/ws');
-                wsUrl.searchParams.set('sample_rate', '16000');
-                wsUrl.searchParams.set('token', API_KEY);
-
-                logStatus('Creating WebSocket connection...');
-                ws = new WebSocket(wsUrl.toString());
+                const wsUrl = 'wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000';
+                ws = new WebSocket(wsUrl);
 
                 ws.onopen = () => {
-                    logStatus('Connection established');
-                    startRecording();
+                    logStatus('Connection established - sending auth...');
+                    // Send authentication message immediately after connection
+                    ws.send(JSON.stringify({
+                        'session_begins': true,
+                        'token': API_KEY
+                    }));
                 };
+
+                let authenticationSuccessful = false;
 
                 ws.onmessage = (event) => {
                     try {
                         const data = JSON.parse(event.data);
                         console.log('Received message:', data);
                         
-                        if (data.message_type === 'FinalTranscript') {
+                        if (!authenticationSuccessful) {
+                            if (data.message_type === 'SessionBegins') {
+                                authenticationSuccessful = true;
+                                logStatus('Authentication successful - starting recording...');
+                                startRecording();
+                            } else if (data.error) {
+                                logStatus(`Authentication error: ${data.error}`);
+                                updateConnectionStatus('Auth Error: ' + data.error, true);
+                            }
+                        } else if (data.message_type === 'FinalTranscript') {
                             window.parent.postMessage({
                                 type: 'streamlit:message',
                                 text: data.text
                             }, '*');
-                        } else if (data.error) {
-                            logStatus(`Server Error: ${data.error}`);
-                            updateConnectionStatus('Server Error', true);
                         }
                     } catch (error) {
                         logStatus(`Error processing message: ${error.message}`);
@@ -145,7 +152,8 @@ def mic_component():
                 isConnected = true;
                 
                 mediaRecorder = new MediaRecorder(stream, {
-                    mimeType: 'audio/webm;codecs=opus'
+                    mimeType: 'audio/webm;codecs=opus',
+                    audioBitsPerSecond: 128000
                 });
                 
                 mediaRecorder.ondataavailable = async (event) => {
