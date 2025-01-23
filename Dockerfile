@@ -7,5 +7,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-ENV PORT=8501
-CMD streamlit run --server.port $PORT --server.address 0.0.0.0 streamlit_app.py
+# Use Railway's PORT environment variable with a fallback
+CMD streamlit run --server.port ${PORT:-8080} --server.address 0.0.0.0 streamlit_app.py
