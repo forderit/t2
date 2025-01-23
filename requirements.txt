@@ -1,6 +1,5 @@
 streamlit==1.32.0
 websockets==12.0
 asyncio==3.4.3
-pyaudio==0.2.14
 python-dotenv==1.0.1
 pathlib==1.0.1
